@@ -1,27 +1,30 @@
 ---
 title: "Practical Machine Learning project writeup"
-author: "me"
-date: "Wednesday, June 17, 2015"
+date: "Sunday, June 21, 2015"
 output: html_document
 ---
 
-report will go here
+##Introduction
+In this report, I analyze the weight lifting technique recognition data located at http://groupware.les.inf.puc-rio.br/har.  In this experiment, six subjects were asked to lift a dumbbell correctly a number of times, and then incorrectly a number of times in four different ways.  So there were a total of five types of lifting motions.  Each observation had a wide variety of data measured from various sensors on the subjects' bodies.  The goal of this report was to train a machine learning model to examine the data and determine which type of lifting motion was used.
 
-One of the first things I noticed was that many of the columns had a lot of NA's in them.  A column that is mostly empty (or mostly one value) doesn't generally provide much information, particularly since the portion of classes (A, B, C, D, and E) are relatively equal.  So I wrote a function to calculate the percentatage of NA values in a column.  After removing those columns, I found yet more columns that were almost entirely blank, so I removed those also.  Doing something like
+##Examining and Cleaning the Data
+There are a total of 19622 observations in the data set, with 160 columns.  The number of each type of motion was roughly equal.  The number of each motion performed by each of the six subjects was not quite equal but close enough that I did not think the distribution of motion classes or motion classes for each person would be helpful.  Code for looking at the counts is given in the appendix.
+
+One of the first things I noticed was that many of the columns had a lot of NA's in them.  A column that is mostly empty (or mostly one value) doesn't generally provide much information, particularly since the portion of classes (A, B, C, D, and E) are relatively equal.  So I wrote a function to calculate the percentatage of NA and blank values in a column.  Doing something like
 
 ```{r}
+set.seed(29185);
 pmltraining <- read.csv("pml-training.csv");
 pmltesting <- read.csv("pml-testing.csv");
 pml <- pmltraining;
 b <- 1;
-source("C:/Users/paul/Coursera/datascience/predmachlearn/project/project.r");
 #sapply(pml[,b], function(b) { print(paste(b, names(pml)[b], class(pml[,b]),fractionEmpty(pml[,b])))});
 ```
-will list all the order, name, and class of each column along with the fraction of NAs or blanks in that column.  Many columns were about 98% NA or blank.
+will list all the order, name, and class of each column along with the fraction of NAs or blanks in that column.  Many columns were about 98% NA or blank.  While a sophisticated model may ignore columns that have blanks or little variation, I didn't want the possibility of them throwing off the results, and I didn't want the added processing time, so I removed these columns.
 
-I also noticed that there were columns for timestamp and user name, which also have no relevance for the class.  Actually, that's not 100% accurate.  Some users had a slightly greater percentage on some classes than others, but not enough to seem very useful.  Also, an astute data scientist might notice that the classe variable was arranged as all A for about the first fifth, then all B, then all C, then all D, then all E, so timestamp could be related to the class if the subjects were asked to do the each class of exercise in order.  But in general time and class may not be related.
+I also noticed that there were columns for timestamp and user name, which also have little relevance for the class.  Also, an astute data scientist might notice that the classe variable was arranged as all A for about the first fifth, then all B, then all C, then all D, then all E, so timestamp could be related to the class if the subjects were asked to do the each class of exercise in order.  But in general time and class may not be related.
 
-This did cause trouble at one point, because when I first did the analysis with Random Forests, training on half the training set and validating on the other half, I got 100% accuracy, which looked almost suspicious, and got all A on the 20 test cases, which also looked suspicious.  But I could not find anything wrong with the code so I submitted one answer...and got it wrong.  I went back and looked and realized I had not removed the "X" column and "num_window" column.  But increase sequentially as you go up.  This means on the training set, you can use this to predict the class, but it is merely because of how the data is arranged.  But the test set did not seem to follow that convention.
+This did cause trouble at one point, because when I first did the analysis with Random Forests, training on half the training set and validating on the other half, I got 100% accuracy.  This looked suspicious, and getting all A on the 20 test cases also looked suspicious.  But I could not find anything wrong with the code so I submitted one answer...and got it wrong.  I went back and looked and realized I had not removed the "X" column and "num_window" column.  Those columns increase as you go up.  This means on the training set, you can use this to predict the class, but it is merely because of how the data is arranged.  But the test set did not seem to follow that convention.  See the appendix for how easy it is to use the X column to predict the results of the training set.
 
 Below is the code I settled on for cleaning.
 
@@ -53,7 +56,6 @@ removeUnnecessaryColumns <- function(old_pml) {
   
   #removing the timestamps because they don't seem to be relevant
   #removing new_window because almost 98% are no and it does not seem to convey useful information
-  #head(new_pml);
   
   #now randomize the order so we don't have all the same type if we do k-fold cross validation (should not be necessary but shouldn't hurt)
   new_indices <- sample(1:dim(new_pml)[1], replace=FALSE);
@@ -67,26 +69,11 @@ pmltest <- removeUnnecessaryColumns(pmltesting);
 
 ```
 
-exploratory
-```{r}
+##Training
 
-#sapply(pml[,b], function(b) { 
-#  print(paste(b, names(pml)[b], class(pml[,b])));
-#  print(summary(pml[,b]));
-#  print(paste("sd: ", sd(pml[,b])));
-#   if(is.numeric(pml[,b])) {
-#     hist(pml[,b], main=paste("histogram of ", names(pml)[b]));
-#   } else if(is.factor(pml[,b])) {
-#     factorHist(pml[,b]);
-#   }
-# });
+I primarily worked with two models, Trees and Random Forests.  I tried training a multiple variable linear model but realized that since the variable we are trying to predict is categorical (five classes) with no order, it does not make sence to use a linear model.  Also, I had implemented Naive Bayes in Java previously and initially had hoped to try it but realized it would not work well.  It can do well when both the input variables and output are categorical, but the inputs here are primarily numerical.
 
-```
-
-Training
-
-I primarily worked with two models, Trees and Random Forests.  I tried training a multiple variable linear model but the answers I got were all numerical, and I realized that since the variable we are trying to predict was catigorical (five classes) that don't really have an order, it does not make sence to use a linear model.  I had implemented Naive Bayes in Java previously, but even though that algorithm does well with predicting categorical variables, it does best when the inputs are also categorial, where the inputs I was dealing with here are numerical.
-
+For each type of model used, I train the model on part of the training set, then test (or validate) it on another part of the training set.  Model generation is done with the train() function in the caret package.  I use the predict() function to generate predictions from the model and the validation data.  I use the confusionMatrix() function from the caret package to compare the results of that prediction to the actual values of the classe column for the validation portion of the data.  The "Accuracy" statistic of the Confusion Matrix gives the ratio of correct values to incorrect values, and above that it has a breakdown of actual and predicted categories.  This accuracy statistic can be used as an estimate of the error that would occur on the test sample.
 
 ```{r}
 
@@ -104,14 +91,11 @@ if(dim(pml_validate)[1] + dim(pml_train)[1] != dim(pml)[1]) { #should be equal
 }
 
 rpartModel <- train(classe ~ ., data=pml_train, method="rpart")
-rpartModel;
 rpartModel$finalModel;
 rPartValidation <- predict(rpartModel, pml_validate);
 if(length(rPartValidation) != dim(pml_validate)[1]) {
   stop("prediction vector is the wrong length");
 }
-
-confusionMatrix(rPartValidation, pml_validate$classe)
 
 rfModel <- train(classe ~ ., data=pml_train, method="rf");
 rfModel;
@@ -121,25 +105,31 @@ if(length(rfValidation) != dim(pml_validate)[1]) {
   stop("prediction vector is the wrong length");
 }
 
-confusionMatrix(rfValidation, pml_validate$classe);
 
-
-
-stopCluster(cl);
+#stopCluster(cl);
 
 ```
 
+##Training Results and Accuracy Estimates
+Here are the accuracy results of the two models.
 
-predict for test cases and submit answers
+```{r}
+confusionMatrix(rPartValidation, pml_validate$classe);
+confusionMatrix(rfValidation, pml_validate$classe);
+
+```
+
+As you can see, the Random Forest Model is significantly more accurate than the tree model.
+
+##Prediction
+It is now time to make predictions for the test cases.  To do this, we simply use the predict() function as we did with validation, but now we use the test data set instead of the validation portion of the training data set.
 ```{r}
 dim(pmltest)
 
+rPartPrediction <- predict(rpartModel, pmltest);
+rfPrediction <- predict(rfModel, pmltest);
+
 finalModel <- rfModel;
-finalModel <- rpartModel;
-
-rPartPrediction2 <- predict(rpartModel, pmltest);
-rfPrediction2 <- predict(rfModel, pmltest);
-
 rfFinalPrediction <- predict(finalModel, pmltest);
 
 if(length(rfFinalPrediction) != dim(pmltest)[1]) {
@@ -147,6 +137,56 @@ if(length(rfFinalPrediction) != dim(pmltest)[1]) {
 }
 rfFinalPrediction;
 
-
 #pml_write_files(rfFinalPrediction);
 ```
+
+##Conclusion and Future Work
+
+From the work detailed in this report, I conclude that a Random Forest model does a good job of predicting the classes of the validation data from the training data.  However, this was only a very simple analysis, and further analysis could prove useful.  Some of the things I would like to investigate are:
+* Tuning the parameters of the Random Forest Model.
+* Use Principal Component Analysis to analyze the correlations between the variables to see if some can be eliminated or combined.
+* Experiment with one or clustering algorithm to see if it outperforms Random Forests.
+
+Finally, to further test this, I would like to see a much greater number of test cases (thousands, not 20).
+
+##Appendix
+
+To see the breakdown of classes and participants:
+```{r}
+source('C:/Users/paul/code/R/util.r');
+factorHist(pmltraining$classe);
+breakdown(pmltraining$user_name, pmltraining$classe)
+```
+factorHist() and breakdown() are functions I have previously written.
+
+One thing I did at one point was to look at a summary of each column, which I did with the code below:
+```{r}
+
+#sapply(pml[,b], function(b) { 
+#  print(paste(b, names(pml)[b], class(pml[,b])));
+#  print(summary(pml[,b]));
+#  print(paste("sd: ", sd(pml[,b])));
+#   if(is.numeric(pml[,b])) {
+#     hist(pml[,b], main=paste("histogram of ", names(pml)[b]));
+#   } else if(is.factor(pml[,b])) {
+#     factorHist(pml[,b]);
+#   }
+# });
+```
+
+To see how well just the "X" variable predicts the class in the training set, look at this:
+```{r}
+pml_x <- pmltraining[,c(1,160)]
+pml_x_train <- pml_x[inTrain,]
+pml_x_validate <- pml_x[-inTrain,];
+
+rfXModel <- train(classe ~ ., data=pml_x_train, method="rf");
+rfXValidation <- predict(rfXModel, pml_x_validate);
+confusionMatrix(rfXValidation, pml_x_validate$classe);
+
+rpartXModel <- train(classe ~ ., data=pml_x_train, method="rpart");
+rpartXValidation <- predict(rpartXModel, pml_x_validate);
+confusionMatrix(rpartXValidation, pml_x_validate$classe);
+stopCluster(cl);
+```
+
