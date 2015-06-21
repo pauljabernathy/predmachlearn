@@ -6,3 +6,147 @@ output: html_document
 ---
 
 report will go here
+
+One of the first things I noticed was that many of the columns had a lot of NA's in them.  A column that is mostly empty (or mostly one value) doesn't generally provide much information, particularly since the portion of classes (A, B, C, D, and E) are relatively equal.  So I wrote a function to calculate the percentatage of NA values in a column.  After removing those columns, I found yet more columns that were almost entirely blank, so I removed those also.  Doing something like
+
+```{r}
+pmltraining <- read.csv("pml-training.csv");
+pmltesting <- read.csv("pml-testing.csv");
+pml <- pmltraining;
+b <- 1;
+source("C:/Users/paul/Coursera/datascience/predmachlearn/project/project.r");
+#sapply(pml[,b], function(b) { print(paste(b, names(pml)[b], class(pml[,b]),fractionEmpty(pml[,b])))});
+```
+will list all the order, name, and class of each column along with the fraction of NAs or blanks in that column.  Many columns were about 98% NA or blank.
+
+I also noticed that there were columns for timestamp and user name, which also have no relevance for the class.  Actually, that's not 100% accurate.  Some users had a slightly greater percentage on some classes than others, but not enough to seem very useful.  Also, an astute data scientist might notice that the classe variable was arranged as all A for about the first fifth, then all B, then all C, then all D, then all E, so timestamp could be related to the class if the subjects were asked to do the each class of exercise in order.  But in general time and class may not be related.
+
+This did cause trouble at one point, because when I first did the analysis with Random Forests, training on half the training set and validating on the other half, I got 100% accuracy, which looked almost suspicious, and got all A on the 20 test cases, which also looked suspicious.  But I could not find anything wrong with the code so I submitted one answer...and got it wrong.  I went back and looked and realized I had not removed the "X" column and "num_window" column.  But increase sequentially as you go up.  This means on the training set, you can use this to predict the class, but it is merely because of how the data is arranged.  But the test set did not seem to follow that convention.
+
+Below is the code I settled on for cleaning.
+
+```{r}
+require(caret);
+
+TRAINING_RATIO <- .1#.66666667;
+source("C:/Users/paul/Coursera/datascience/predmachlearn/project/project.r")
+old_pml <- pmltesting;
+removeUnnecessaryColumns <- function(old_pml) {
+  #first, remove columns that are mostly null or blank
+  b <- 1; i <- 2;
+  #sapply(pml[,b], function(b) { print(paste(b, names(pml)[b], class(pml[,b]),fractionNA(pml[,b]))});
+  
+  new_pml <- data.frame(old_pml[,1])
+  names(new_pml) <- names(old_pml[1])
+  
+  for(b in 2:160) { if(fractionEmpty(old_pml[,b]) < .5) { new_pml <- cbind(new_pml, old_pml[,b]);}}
+  for(b in 2:160) { if(fractionEmpty(old_pml[,b]) < .5) { names(new_pml)[i] <- names(old_pml)[b]; i <- i + 1}}
+  
+  
+  #remove columns that are not relevant, like timestamps
+  names(new_pml)
+  cnames <- names(new_pml); #just to make the next line a little shorter
+  to_remove <- c(grep("X", cnames), grep("user_name",cnames), grep("num_window", cnames), 
+                 grep("raw_timestamp_part_1", cnames), grep("raw_timestamp_part_2", cnames), 
+                 grep("cvtd_timestamp", cnames), grep("new_window",cnames));
+  new_pml <- new_pml[-to_remove]
+  
+  #removing the timestamps because they don't seem to be relevant
+  #removing new_window because almost 98% are no and it does not seem to convey useful information
+  #head(new_pml);
+  
+  #now randomize the order so we don't have all the same type if we do k-fold cross validation (should not be necessary but shouldn't hurt)
+  new_indices <- sample(1:dim(new_pml)[1], replace=FALSE);
+  new_pml <- new_pml[new_indices,];
+  return(new_pml);
+}
+
+#copy to new variables so I still have the originals if I remove something I shouldn't.
+pml <- removeUnnecessaryColumns(pmltraining);
+pmltest <- removeUnnecessaryColumns(pmltesting);
+
+```
+
+exploratory
+```{r}
+
+#sapply(pml[,b], function(b) { 
+#  print(paste(b, names(pml)[b], class(pml[,b])));
+#  print(summary(pml[,b]));
+#  print(paste("sd: ", sd(pml[,b])));
+#   if(is.numeric(pml[,b])) {
+#     hist(pml[,b], main=paste("histogram of ", names(pml)[b]));
+#   } else if(is.factor(pml[,b])) {
+#     factorHist(pml[,b]);
+#   }
+# });
+
+```
+
+Training
+
+I primarily worked with two models, Trees and Random Forests.  I tried training a multiple variable linear model but the answers I got were all numerical, and I realized that since the variable we are trying to predict was catigorical (five classes) that don't really have an order, it does not make sence to use a linear model.  I had implemented Naive Bayes in Java previously, but even though that algorithm does well with predicting categorical variables, it does best when the inputs are also categorial, where the inputs I was dealing with here are numerical.
+
+
+```{r}
+
+#use the doParallel package to hopefully speed things up a little
+library(doParallel)
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+
+inTrain <- createDataPartition(y=pml$classe, p = TRAINING_RATIO, list=F)
+pml_train <- pml[inTrain,];
+pml_validate <- pml[-inTrain,];
+
+if(dim(pml_validate)[1] + dim(pml_train)[1] != dim(pml)[1]) { #should be equal
+  stop("dimensions do not add up");
+}
+
+rpartModel <- train(classe ~ ., data=pml_train, method="rpart")
+rpartModel;
+rpartModel$finalModel;
+rPartValidation <- predict(rpartModel, pml_validate);
+if(length(rPartValidation) != dim(pml_validate)[1]) {
+  stop("prediction vector is the wrong length");
+}
+
+confusionMatrix(rPartValidation, pml_validate$classe)
+
+rfModel <- train(classe ~ ., data=pml_train, method="rf");
+rfModel;
+rfModel$finalModel;
+rfValidation <- predict(rfModel, pml_validate);
+if(length(rfValidation) != dim(pml_validate)[1]) {
+  stop("prediction vector is the wrong length");
+}
+
+confusionMatrix(rfValidation, pml_validate$classe);
+
+
+
+stopCluster(cl);
+
+```
+
+
+predict for test cases and submit answers
+```{r}
+dim(pmltest)
+
+finalModel <- rfModel;
+finalModel <- rpartModel;
+
+rPartPrediction2 <- predict(rpartModel, pmltest);
+rfPrediction2 <- predict(rfModel, pmltest);
+
+rfFinalPrediction <- predict(finalModel, pmltest);
+
+if(length(rfFinalPrediction) != dim(pmltest)[1]) {
+  stop("prediction vector is the wrong length");
+}
+rfFinalPrediction;
+
+
+#pml_write_files(rfFinalPrediction);
+```
